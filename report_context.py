@@ -74,7 +74,10 @@ def get_report_context(storage_dir: Path) -> dict:
             if not isinstance(reports, list):
                 reports = []
             validation_reports = [
-                r for r in reports if r.get("type") == "validation" and r.get("createdAt")
+                r for r in reports
+                if r.get("type") == "validation"
+                and r.get("createdAt")
+                and not is_calibration_report(r)
             ]
             if validation_reports:
                 validation_reports.sort(
@@ -95,9 +98,26 @@ def get_report_context(storage_dir: Path) -> dict:
     return result
 
 
+def is_calibration_report(report: dict) -> bool:
+    """Calibration records stay out of the validation list, including older rows saved as validation."""
+    if not isinstance(report, dict):
+        return False
+    rtype = (report.get("type") or "").strip().lower()
+    if rtype == "calibration":
+        return True
+    subtype = (report.get("validationSubtype") or "").strip().lower()
+    name = (report.get("name") or "").strip().lower()
+    status = (report.get("status") or "").strip().upper()
+    return (
+        subtype == "calibration"
+        or name.startswith("calibration")
+        or status.startswith("CALIBRATED")
+    )
+
+
 def get_filtered_reports_meta(storage_dir: Path, filter_type: str = "all") -> list:
     """
-    Read reports from storage, filter by type (test|validation|all),
+    Read reports from storage, filter by type (test|validation|calibration|all),
     sort by createdAt descending (completedAt fallback). Return list unchanged.
     """
     storage_dir = Path(storage_dir)
@@ -112,8 +132,16 @@ def get_filtered_reports_meta(storage_dir: Path, filter_type: str = "all") -> li
         except Exception:
             reports = []
 
-    if filter_type in ("test", "validation"):
-        reports = [r for r in reports if r.get("type") == filter_type]
+    filter_type = (filter_type or "all").strip().lower()
+    if filter_type == "calibration":
+        reports = [r for r in reports if is_calibration_report(r)]
+    elif filter_type == "validation":
+        reports = [
+            r for r in reports
+            if r.get("type") == "validation" and not is_calibration_report(r)
+        ]
+    elif filter_type == "test":
+        reports = [r for r in reports if r.get("type") == "test"]
 
     def sort_key(r):
         ts = r.get("completedAt") or r.get("createdAt") or ""

@@ -1903,10 +1903,18 @@ def get_report_ids_by_type(filter_type):
         name = f.stem
         report_meta = next((r for r in reports_meta if r.get('id') in name or name in r.get('id', '')), None)
         if report_meta:
-            report_type = (report_meta.get('type') or '').lower()
-            if filter_type.lower() in report_type or report_type in filter_type.lower():
+            wanted = (filter_type or "").strip().lower()
+            if wanted == "calibration" and report_context.is_calibration_report(report_meta):
                 matching_ids.append(name)
-        elif filter_type.lower() in name.lower():
+            elif wanted == "validation" and (report_meta.get("type") or "").lower() == "validation" and not report_context.is_calibration_report(report_meta):
+                matching_ids.append(name)
+            elif wanted == "test" and (report_meta.get("type") or "").lower() == "test":
+                matching_ids.append(name)
+            elif wanted not in ("calibration", "validation", "test"):
+                report_type = (report_meta.get('type') or '').lower()
+                if wanted and (wanted in report_type or report_type in wanted):
+                    matching_ids.append(name)
+        elif filter_type and filter_type.lower() in name.lower():
             matching_ids.append(name)
     return matching_ids
 

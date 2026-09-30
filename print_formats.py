@@ -153,9 +153,64 @@ def generate_text_report(report_data, txt_path, layout='a4'):
             instrument_id = factory_settings.get('instrumentId') or report_data.get('instrumentId') or 'N/A'
             last_validation = factory_settings.get('lastValidationDate') or report_data.get('lastValidationDate') or 'N/A'
             next_validation = factory_settings.get('nextValidationDate') or report_data.get('nextValidationDate') or 'N/A'
-            is_validation = report_data.get('type') == 'validation'
+            rtype = (report_data.get('type') or '').strip().lower()
+            subtype_raw = (report_data.get('validationSubtype') or '').strip().lower()
+            report_name = (report_data.get('name') or '').strip().lower()
+            report_status = (report_data.get('status') or '').strip().upper()
+            is_calibration = (
+                rtype == 'calibration'
+                or subtype_raw == 'calibration'
+                or report_name.startswith('calibration')
+                or report_status.startswith('CALIBRATED')
+            )
+            is_validation = rtype == 'validation' and not is_calibration
 
-            if is_validation:
+            if is_calibration:
+                operator = report_data.get('operatorName') or report_data.get('operator') or 'N/A'
+                operator_id = report_data.get('operatorId') or report_data.get('employeeId') or report_data.get('username') or 'N/A'
+                def _fmt_c(val):
+                    return f"{float(val):.2f}C" if isinstance(val, (int, float)) else 'N/A'
+                f.write(line)
+                if layout == 'thermal':
+                    f.write("RAISE LAB EQUIPMENT\n")
+                    f.write("Tablet Disintegration Tester\n")
+                    f.write(thin_line)
+                    f.write(f"{company_name}\n")
+                    f.write("CALIBRATION REPORT\n")
+                else:
+                    f.write(f"{'RAISE LAB EQUIPMENT':^{width}}\n")
+                    f.write(f"{'Tablet Disintegration Tester':^{width}}\n")
+                    f.write(thin_line)
+                    f.write(f"{company_name:^{width}}\n")
+                    f.write(f"{'CALIBRATION REPORT':^{width}}\n")
+                f.write(thin_line)
+                if layout == 'thermal':
+                    f.write(f"Model No     : {model_no}\n")
+                    f.write(f"Serial No    : {serial_no}\n")
+                    f.write(f"Location     : {location}\n")
+                    f.write(f"Instrument No: {instrument_id}\n")
+                else:
+                    label_width = 20
+                    value_width = (width - label_width - 3) // 2
+                    f.write(f"Model No            : {model_no:<{value_width}} Serial No          : {serial_no}\n")
+                    f.write(f"Location            : {location:<{value_width}} Instrument No      : {instrument_id}\n")
+                f.write(thin_line)
+                label_width = 35 if layout != 'thermal' else 20
+                f.write(f"{'Bath':<{label_width}}: Shared bath\n")
+                f.write(f"{'Sensor Reading':<{label_width}}: {_fmt_c(report_data.get('setTemperature'))}\n")
+                f.write(f"{'Measured Temperature':<{label_width}}: {_fmt_c(report_data.get('measuredTemperature'))}\n")
+                f.write(f"{'Offset':<{label_width}}: {_fmt_c(report_data.get('calibrationOffset'))}\n")
+                f.write(f"{'Deviation':<{label_width}}: {_fmt_c(report_data.get('deviation'))}\n")
+                f.write(f"{'Status':<{label_width}}: {report_data.get('status') or 'CALIBRATED & PASSED'}\n")
+                f.write(f"{'Date & Time':<{label_width}}: {format_dt(report_data.get('createdAt'))}\n")
+                f.write(line)
+                f.write(f"Operator            : {operator}\n")
+                f.write(f"Employee ID         : {operator_id}\n")
+                f.write(f"Remarks:\n\n")
+                f.write(thin_line)
+                f.write(f"Approved By:\n")
+                f.write(line)
+            elif is_validation:
                 subtype = report_data.get('validationSubtype') or 'temp'
                 subtype_text = 'STROKE' if subtype == 'stroke' else 'TEMP'
                 basket = report_data.get('basket') or report_data.get('beaker') or 1

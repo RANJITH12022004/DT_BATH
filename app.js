@@ -5876,7 +5876,7 @@ async function loadReports(filterType) {
       currentReportFilter = 'all';
     }
     
-    var filter = (filterType === 'test' || filterType === 'validation') ? filterType : 'all';
+    var filter = (filterType === 'test' || filterType === 'validation' || filterType === 'calibration') ? filterType : 'all';
     var res = await fetch('/api/reports_meta?filter=' + encodeURIComponent(filter));
     var data = await res.json().catch(function() { return {}; });
     var reports = (data.ok && data.reports) ? data.reports : [];
@@ -6056,7 +6056,14 @@ async function saveReportPdfFromHtml(report) {
     
     // Render the report (this populates #report-content). Do not force vessel tables visible here —
     // timer vs manual and dual-basket layouts are handled by renderTestReport / renderDualSessionTestReport.
-    if (report.type === 'validation') {
+    if (isCalibrationReport(report)) {
+      if (typeof renderCalibrationReport === 'function') {
+        renderCalibrationReport(report);
+      } else {
+        console.error('[REPORT] renderCalibrationReport function not found');
+        return false;
+      }
+    } else if (report.type === 'validation') {
       if (typeof renderValidationReport === 'function') {
         renderValidationReport(report);
       } else {
@@ -6754,7 +6761,9 @@ async function openReportPreview(id) {
     currentReportMeta = report;
     
     // Check report type and render accordingly
-    if (report.type === 'validation') {
+    if (isCalibrationReport(report)) {
+      renderCalibrationReport(report);
+    } else if (report.type === 'validation') {
       renderValidationReport(report);
     } else {
       renderTestReport(report);
@@ -6771,12 +6780,80 @@ async function openReportPreview(id) {
   }
 }
 
-function renderValidationReport(report) {
-  // Hide test report fields, show validation report fields
+function isCalibrationReport(report) {
+  if (!report) return false;
+  var rtype = String(report.type || '').toLowerCase();
+  if (rtype === 'calibration') return true;
+  var subtype = String(report.validationSubtype || '').toLowerCase();
+  var name = String(report.name || '').toLowerCase();
+  var status = String(report.status || '').toUpperCase();
+  return subtype === 'calibration' || name.indexOf('calibration') === 0 || status.indexOf('CALIBRATED') === 0;
+}
+
+function setReportSectionVisibility(which) {
   var testReportFields = document.getElementById('test-report-fields');
   var validationReportFields = document.getElementById('validation-report-fields');
-  if (testReportFields) testReportFields.style.display = 'none';
-  if (validationReportFields) validationReportFields.style.display = 'block';
+  var calibrationReportFields = document.getElementById('calibration-report-fields');
+  if (testReportFields) testReportFields.style.display = which === 'test' ? 'block' : 'none';
+  if (validationReportFields) validationReportFields.style.display = which === 'validation' ? 'block' : 'none';
+  if (calibrationReportFields) calibrationReportFields.style.display = which === 'calibration' ? 'block' : 'none';
+}
+
+function renderCalibrationReport(report) {
+  setReportSectionVisibility('calibration');
+  var titleEl = document.getElementById('report-title');
+  if (titleEl) titleEl.textContent = 'CALIBRATION REPORT';
+  var typeEl = document.getElementById('report-cal-type');
+  if (typeEl) typeEl.textContent = 'Calibration';
+  var bathEl = document.getElementById('report-cal-bath');
+  if (bathEl) bathEl.textContent = 'Shared bath';
+  function fmtC(v) {
+    return (typeof v === 'number' && !isNaN(v)) ? v.toFixed(2) + '°C' : 'N/A';
+  }
+  var sensorEl = document.getElementById('report-cal-sensor');
+  if (sensorEl) sensorEl.textContent = fmtC(report.setTemperature);
+  var measuredEl = document.getElementById('report-cal-measured');
+  if (measuredEl) measuredEl.textContent = fmtC(report.measuredTemperature);
+  var offsetEl = document.getElementById('report-cal-offset');
+  if (offsetEl) offsetEl.textContent = fmtC(report.calibrationOffset);
+  var deviationEl = document.getElementById('report-cal-deviation');
+  if (deviationEl) deviationEl.textContent = fmtC(report.deviation);
+  var statusEl = document.getElementById('report-cal-status');
+  if (statusEl) statusEl.textContent = report.status || 'CALIBRATED & PASSED';
+  var dateEl = document.getElementById('report-cal-date');
+  if (dateEl && report.createdAt) {
+    var date = new Date(report.createdAt);
+    if (!isNaN(date.getTime())) {
+      dateEl.textContent = date.toLocaleDateString('en-GB', {day: '2-digit', month: '2-digit', year: 'numeric'}) + ' ' +
+        date.toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit', hour12: false});
+    }
+  }
+  (async function() {
+    try {
+      const ctx = await getReportContext();
+      const modelEl = document.getElementById('report-model-no');
+      const serialEl = document.getElementById('report-serial-no');
+      const locEl = document.getElementById('report-location');
+      const instrEl = document.getElementById('report-instrument-no');
+      const lastValEl = document.getElementById('report-last-validation');
+      const nextValEl = document.getElementById('report-next-validation');
+      if (modelEl) modelEl.textContent = ctx.modelNo || '';
+      if (serialEl) serialEl.textContent = ctx.serialNo || '';
+      if (locEl) locEl.textContent = ctx.location || '';
+      if (instrEl) instrEl.textContent = ctx.instrumentId || '';
+      if (lastValEl) lastValEl.textContent = ctx.lastValidationDate || '';
+      if (nextValEl) nextValEl.textContent = ctx.nextValidationDate || '';
+    } catch (e) {}
+  })();
+  var operatorEl = document.getElementById('report-operator-name');
+  var operatorIdEl = document.getElementById('report-operator-id');
+  if (operatorEl) operatorEl.textContent = report.operatorName || (currentUser && currentUser.name) || '';
+  if (operatorIdEl) operatorIdEl.textContent = report.operatorId || (currentUser && currentUser.username) || '';
+}
+
+function renderValidationReport(report) {
+  // Hide test and calibration fields, show validation report fields
+  setReportSectionVisibility('validation');
   
   // Determine validation subtype
   var subtype = report.validationSubtype || 'temp';
@@ -6948,10 +7025,7 @@ function renderValidationReport(report) {
 }
 
 function renderDualSessionTestReport(report) {
-  var testReportFields = document.getElementById('test-report-fields');
-  var validationReportFields = document.getElementById('validation-report-fields');
-  if (testReportFields) testReportFields.style.display = 'block';
-  if (validationReportFields) validationReportFields.style.display = 'none';
+  setReportSectionVisibility('test');
 
   var minmaxSection = document.getElementById('report-minmax-section');
   if (minmaxSection) minmaxSection.style.display = '';
@@ -7198,11 +7272,7 @@ function renderTestReport(report) {
     renderDualSessionTestReport(report);
     return;
   }
-  // Show test report fields, hide validation report fields
-  var testReportFields = document.getElementById('test-report-fields');
-  var validationReportFields = document.getElementById('validation-report-fields');
-  if (testReportFields) testReportFields.style.display = 'block';
-  if (validationReportFields) validationReportFields.style.display = 'none';
+  setReportSectionVisibility('test');
   
   // Show min/max temperatures (used in test reports)
   var minmaxSection = document.getElementById('report-minmax-section');
@@ -8813,8 +8883,8 @@ async function performCalibration() {
     
     var report = {
       id: Date.now(),
-      type: 'validation',
-      validationSubtype: 'temp',
+      type: 'calibration',
+      validationSubtype: 'calibration',
       name: 'Calibration Report – Shared bath (IR1, EXT1, EXT2)',
       createdAt: rtcCreatedAt || new Date().toISOString(),
       productName1: null,
@@ -8833,6 +8903,9 @@ async function performCalibration() {
     };
     
     await saveReportRecord(report);
+    if (typeof saveReportPdfFromHtml === 'function') {
+      await saveReportPdfFromHtml(report);
+    }
     
     if (typeof showModal === 'function') {
       showModal('Calibration saved for the shared bath (three channels). Offset vs IR1: ' + offset.toFixed(2) + '°C');
